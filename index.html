@@ -130,9 +130,10 @@ select.inp { padding: 6px 8px; }
 .st-wrap { max-width: 1240px; margin: 0 auto; padding: 28px 22px 40px; }
 .st-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 20px; }
 .logo { display: flex; align-items: center; gap: 14px; }
-.logo-mark { width: 52px; height: 52px; border: 2px solid var(--sand); border-radius: 6px; display: grid; place-items: center; font: 800 15px var(--mono); color: var(--sand); background: rgba(205,187,134,.06); letter-spacing: .05em; }
+.logo-mark { flex-shrink: 0; width: 52px; height: 52px; border: 2px solid var(--sand); border-radius: 6px; display: grid; place-items: center; font: 800 15px var(--mono); color: var(--sand); background: rgba(205,187,134,.06); letter-spacing: .05em; }
 .logo h1 { font-size: 30px; letter-spacing: .12em; color: var(--text); }
 .logo h1 span { color: var(--olive3); }
+.logo h1 span.brand-unit { color: var(--sand); }
 .logo p { margin: 2px 0 0; color: var(--text2); }
 .st-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px; }
 .st-card { background: rgba(26,29,23,.92); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
@@ -17609,7 +17610,7 @@ window.TLP = window.TLP || {};
 
       root.appendChild(h('div', { class: 'st-wrap' },
         h('div', { class: 'st-head' },
-          h('div', { class: 'logo' }, h('div', { class: 'logo-mark' }, 'TLP'), h('div', null, h('h1', null, 'TLP ', h('span', null, 'TRAINER')), h('p', null, 'Навчальний симулятор процедури організації бою (Troop Leading Procedures) для командирів взводів'))),
+          h('div', { class: 'logo' }, h('div', { class: 'logo-mark' }, 'TLP'), h('div', null, h('h1', null, 'TLP ', h('span', null, 'TRAINER'), ' ', h('span', { class: 'brand-unit' }, 'ХАРТІЯ')), h('p', null, 'Навчальний симулятор процедури організації бою (Troop Leading Procedures) для командирів взводів'))),
           h('div', { class: 'row' },
             cadet ? null : UI.btn('Пульт інструктора', () => this.openConsole(), 'sm'),
             cadet ? null : UI.btn('Редактор сценаріїв', () => this.guardInstructor(() => T.Console.openEditor()), 'sm'),
