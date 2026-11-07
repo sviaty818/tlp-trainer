@@ -142,6 +142,10 @@ select.inp { padding: 6px 8px; }
 .mode-cards.two { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .send-card { border-color: var(--olive2); background: var(--panel2); margin-bottom: 16px; }
 .send-card p { margin: 0 0 10px; color: var(--text2); }
+.send-card .send-status { margin: 0; flex: 1 1 260px; min-width: 0; font-weight: 600; color: var(--text); }
+.send-card .send-status.ok { color: var(--green); }
+.send-card .send-status.bad { color: var(--red); font-weight: 500; }
+[hidden] { display: none !important; }
 .scen-cards { grid-template-columns: repeat(2, minmax(0,1fr)); }
 .pick { border: 1px solid var(--line2); background: #171a14; border-radius: 8px; padding: 10px 11px; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
 .pick:hover { border-color: var(--sand2); }
@@ -436,7 +440,7 @@ select.inp { padding: 6px 8px; }
 <div id="toast-root" aria-live="polite"></div>
 <noscript><p style="padding:20px;color:#fff">Для роботи TLP TRAINER потрібно увімкнути JavaScript.</p></noscript>
 
-<script>window.TLP_CONFIG = { cadet: true };</script>
+<script>window.TLP_CONFIG = { cadet: true, reportUrl: 'https://script.google.com/macros/s/AKfycbyagFAJiq4xYkSawj-W3lEPdLPIrjwcklfH7BkeplzP7AmWWuzHukQMTnNVHu0y4-0pmQ/exec' };</script>
 <script>/* js/util.js */
 /* TLP TRAINER — загальні утиліти.
    Простір імен TLP використовується замість ES-модулів, щоб застосунок
@@ -1134,6 +1138,97 @@ window.TLP = window.TLP || {};
 
   T.Store = Store;
   T.Sync = LocalSync;
+})(window.TLP);
+
+</script>
+<script>/* js/report.js */
+/* TLP TRAINER — автоматична передача результатів викладачу через Google-таблицю (Google Apps Script).
+   Командир (сайт): завершений сеанс надсилається POST-запитом; якщо не вдалося — повтор при наступному відкритті.
+   Викладач (локальний index.html): GET із ключем викладача завантажує нові результати в пульт.
+   Адреса скрипта: TLP_CONFIG.reportUrl (збірка для сайту) або TLP_LOCAL.reportUrl (local-config.js).
+   Ключ викладача є лише в local-config.js на комп'ютері викладача. */
+(function (T) {
+  'use strict';
+  const U = T.U;
+  const SENT = 'tlp.report-sent.v1';
+  const SYNC = 'tlp.report-sync.v1';
+  const get = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
+  const set = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } };
+  const conf = () => Object.assign({}, window.TLP_LOCAL || {}, window.TLP_CONFIG || {});
+
+  const Report = {
+    url() {
+      const u = String(conf().reportUrl || '').trim();
+      return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u) ? u : '';
+    },
+    key() { return String((window.TLP_LOCAL && window.TLP_LOCAL.reportKey) || ''); },
+    /** На claude.ai зовнішні запити заборонені, тож там передача вимкнена. */
+    canSend() { return !!Report.url() && !U.viewer(); },
+    canFetch() { return Report.canSend() && !!Report.key(); },
+    isSent(s) { return !!(s && get(SENT, {})[s.id]); },
+
+    async send(s) {
+      if (!Report.canSend()) throw new Error('Передачу результатів не налаштовано');
+      if (!s || !s.finished) throw new Error('Сеанс ще не завершено');
+      let res;
+      try {
+        res = await fetch(Report.url(), { method: 'POST', body: JSON.stringify({ format: 'tlp-report', v: 1, session: s }), redirect: 'follow' });
+      } catch (e) { throw new Error('немає зв\'язку з сервером'); }
+      let j = null;
+      try { j = await res.json(); } catch (e) { /* відповідь не JSON */ }
+      if (!j || !j.ok) throw new Error(j && j.error ? 'сервер: ' + j.error : 'сервер відповів ' + res.status);
+      const m = get(SENT, {}); m[s.id] = Date.now(); set(SENT, m);
+      return true;
+    },
+
+    /** Надіслати всі завершені, але ще не надіслані сеанси цього браузера. */
+    async sendPending() {
+      if (!Report.canSend()) return 0;
+      let n = 0;
+      for (const x of T.Store.listSessions()) {
+        if (!x.finished || Report.isSent(x)) continue;
+        const s = T.Store.load(x.id);
+        if (!s || !s.finished) continue;
+        try { await Report.send(s); n++; } catch (e) { break; }
+      }
+      return n;
+    },
+
+    /** Завантажити результати з таблиці. full = усі, інакше лише нові з минулого разу. */
+    async fetchResults(full) {
+      if (!Report.canFetch()) throw new Error('Не вказано адресу скрипта або ключ викладача (local-config.js)');
+      const since = full ? 0 : get(SYNC, 0);
+      let res;
+      try {
+        res = await fetch(Report.url() + '?key=' + encodeURIComponent(Report.key()) + '&since=' + since, { redirect: 'follow' });
+      } catch (e) { throw new Error('немає зв\'язку з Google'); }
+      let j = null;
+      try { j = await res.json(); } catch (e) { /* ignore */ }
+      if (!j || !j.ok) throw new Error(j && j.error === 'key' ? 'ключ викладача не збігається зі скриптом' : 'сервер відповів ' + (j && j.error || res.status));
+      let ok = 0, bad = 0, maxAt = since;
+      (j.sessions || []).forEach(r => {
+        maxAt = Math.max(maxAt, r.at || 0);
+        if (!r.data) { bad++; return; }
+        try { Report.merge(JSON.parse(r.data)); ok++; } catch (e) { bad++; }
+      });
+      set(SYNC, maxAt);
+      return { ok, bad };
+    },
+
+    /** Імпорт сеансу з таблиці: коригування й коментарі викладача, зроблені на цьому комп'ютері, зберігаються. */
+    merge(s) {
+      if (!s || s.format !== 'tlp-session') throw new Error('не сеанс');
+      const local = T.Store.load(s.id);
+      const li = local && local.instructor;
+      if (li && ((li.comments || []).length || Object.keys(li.adjustments || {}).length)) {
+        s.instructor = li;
+        if (s.finished && s.result) s.result = Object.assign(s.result, T.Scoring.compute(s));
+      }
+      T.Store.importSession(JSON.stringify(s), { replace: true });
+    }
+  };
+
+  T.Report = Report;
 })(window.TLP);
 
 </script>
@@ -17650,8 +17745,11 @@ window.TLP = window.TLP || {};
                 h('li', null, 'Обстановка змінюється: вступні вимагають швидких рішень.'),
                 h('li', null, 'ІІ-інструктор ставить навідні запитання, а не дає готових відповідей.'),
                 h('li', null, 'Наприкінці — бій, оцінка за 100-бальною шкалою і детальний розбір.'),
-                cadet ? h('li', null, h('b', null, 'Після завершення збережіть файл результату й надішліть його викладачу.')) : null)))),
+                cadet ? h('li', null, h('b', null, T.Report && T.Report.canSend() ? 'Після завершення результат автоматично надійде викладачу.' : 'Після завершення збережіть файл результату й надішліть його викладачу.')) : null)))),
         h('div', { class: 'disclaimer' }, 'Навчальний інструмент. Усі сценарії, карти, підрозділи та характеристики вигадані й умовні; програма не є системою реального бойового управління і не містить реальних даних. Прогрес зберігається лише в цьому браузері (localStorage) — для перенесення використовуйте експорт сеансу.')));
+      if (cadet && T.Report && T.Report.canSend()) {
+        T.Report.sendPending().then(n => { if (n) UI.toast('Раніше не надіслані результати передано викладачу: ' + n + '.', 'ok'); });
+      }
     },
 
     guardInstructor(fn) {
@@ -18182,6 +18280,35 @@ window.TLP = window.TLP || {};
       clearInterval(this.ticker);
       this.renderDebrief();
     },
+    /** Картка «результат для викладача» у версії командира: автоматична відправка + файл як запасний варіант. */
+    sendCard(S) {
+      const R = T.Report;
+      const auto = !!(R && R.canSend());
+      const status = h('p', { class: 'send-status' });
+      const fileBtns = h('div', { class: 'row' },
+        UI.btn('Зберегти файл результату', () => { Store.flush(); Store.exportSession(S); }, auto ? '' : 'primary'),
+        UI.btn('Звіт → PDF (для себе)', () => T.Docs.exportPDF(S, ['report'], 'Звіт TLP')));
+      const card = h('div', { class: 'st-card send-card' }, h('h2', null, auto ? 'Результат для викладача' : 'Надішліть результат викладачу'));
+      if (!auto) {
+        card.appendChild(h('p', null, 'Збережіть файл результату й надішліть його викладачу (Telegram, пошта тощо). У файлі всі ваші рішення, документи й оцінка; викладач відкриє його у своєму пульті.'));
+        card.appendChild(fileBtns);
+        return card;
+      }
+      const retry = UI.btn('Надіслати ще раз', () => go(), 'sm primary');
+      const show = (cls, text, canRetry) => { status.className = 'send-status ' + cls; status.textContent = text; retry.hidden = !canRetry; };
+      const go = () => {
+        show('', 'Надсилаю результат викладачу…', false);
+        Store.flush();
+        R.send(S).then(() => show('ok', '✓ Результат надіслано викладачу автоматично. Більше нічого робити не потрібно.', false))
+          .catch(e => show('bad', 'Не вдалося надіслати (' + e.message + '). Перевірте інтернет і натисніть «Надіслати ще раз» або збережіть файл і надішліть його викладачу вручну.', true));
+      };
+      card.appendChild(h('div', { class: 'row', style: { alignItems: 'center', marginBottom: '8px' } }, status, retry));
+      card.appendChild(h('p', { class: 'muted', style: { fontSize: '12.5px' } }, 'Запасний варіант: файл результату можна зберегти й надіслати вручну.'));
+      card.appendChild(fileBtns);
+      if (R.isSent(S)) show('ok', '✓ Результат надіслано викладачу.', false); else go();
+      return card;
+    },
+
     renderDebrief() {
       const S = this.S;
       if (!S.result) T.Scoring.finalize(S);
@@ -18197,10 +18324,7 @@ window.TLP = window.TLP || {};
             h('div', { class: 'muted' }, S.cadet.name + (S.cadet.group ? ' · ' + S.cadet.group : '') + ' · режим: ' + T.MODES[S.mode].title + ' · підказок: ' + U.sum(Object.values(S.steps).map(x => x.hints || 0)))),
           h('div', { class: 'db-total' }, h('div', { class: 'db-score', style: { fontSize: String(r.total).length > 3 ? '28px' : '34px' } }, String(r.total)), h('div', null, h('div', { class: 'db-grade ' + r.grade.cls }, r.grade.text), h('div', { class: 'muted' }, r.total + ' з 100 балів')))),
         b && b.outcome ? h('div', { class: 'outcome ' + b.outcome.cls }, h('b', null, b.outcome.title), h('div', null, b.outcome.text)) : null,
-        U.cadet ? h('div', { class: 'st-card send-card' }, h('h2', null, 'Надішліть результат викладачу'),
-          h('p', null, 'Збережіть файл результату й надішліть його викладачу (Telegram, пошта тощо). У файлі всі ваші рішення, документи й оцінка; викладач відкриє його у своєму пульті.'),
-          h('div', { class: 'row' }, UI.btn('Зберегти файл результату', () => { Store.flush(); Store.exportSession(S); }, 'primary'),
-            UI.btn('Звіт → PDF (для себе)', () => T.Docs.exportPDF(S, ['report'], 'Звіт TLP')))) : null,
+        U.cadet ? this.sendCard(S) : null,
         h('div', { class: 'db-grid' },
           h('div', { class: 'st-card' }, h('h2', null, 'Оцінка за критеріями'),
             ...r.criteria.map(c => h('div', { class: 'crit-row' }, h('span', null, c.title + (c.adj ? ' (корект. ' + (c.adj > 0 ? '+' : '') + c.adj + ')' : '')), UI.meter(c.score, c.weight, c.pct < 0.6 ? 'bad' : c.pct < 0.75 ? 'warn' : ''), h('b', null, c.score + '/' + c.weight)))),
@@ -18384,6 +18508,19 @@ window.TLP = window.TLP || {};
     open() {
       T.App.showScreen('console');
       this.render();
+      if (!this._fetchedOnce && T.Report && T.Report.canFetch()) { this._fetchedOnce = true; this.fetchResults(false, true); }
+    },
+    /** Результати командирів із Google-таблиці. quiet: без повідомлення, якщо нових немає. */
+    fetchResults(full, quiet) {
+      if (this._fetching) return;
+      this._fetching = true;
+      if (!quiet) UI.toast('Отримую результати з Google-таблиці…', 'info');
+      T.Report.fetchResults(full).then(r => {
+        if (r.ok || !quiet) UI.toast(r.ok ? 'Отримано результатів: ' + r.ok + '.' : 'Нових результатів немає.', r.ok ? 'ok' : 'info');
+        if (r.bad) UI.toast('Не вдалося прочитати записів: ' + r.bad + '.', 'warn');
+        if (r.ok && !U.$('#scr-console').classList.contains('hidden')) this.render();
+      }).catch(e => UI.toast('Результати не отримано: ' + U.esc(e.message) + '.', 'error', 7000))
+        .finally(() => { this._fetching = false; });
     },
     render() {
       const root = U.clear(U.$('#scr-console'));
@@ -18436,6 +18573,7 @@ window.TLP = window.TLP || {};
         h('div', { class: 'db-head' },
           h('div', null, h('div', { class: 'tb-logo' }, 'TLP', h('span', null, '·'), 'TRAINER · ПУЛЬТ ІНСТРУКТОРА'), h('h2', { style: { fontSize: '22px', marginTop: '6px' } }, 'Курсанти та результати')),
           h('div', { class: 'row' },
+            T.Report && T.Report.canFetch() ? UI.btn('⟳ Отримати результати (Google)', e => this.fetchResults(!!(e && e.shiftKey), false), 'sm primary', { title: 'Нові результати командирів із Google-таблиці. Утримуйте Shift, щоб завантажити всі наново.' }) : null,
             UI.btn('Імпорт результатів (.json)', async () => {
               const files = await U.pickFiles('.json,application/json'); if (!files.length) return;
               let ok = 0; const bad = [];
@@ -18453,7 +18591,11 @@ window.TLP = window.TLP || {};
             UI.btn('Відомість (CSV)', csv, 'sm', { disabled: !fin.length }),
             UI.btn('Редактор сценаріїв', () => this.openEditor(), 'sm'),
             UI.btn('Головне меню', () => { T.App.showScreen('start'); T.App.renderStart(); }, 'sm'))),
-        UI.note('Командири, що працюють на сайті, надсилають вам файли результатів (TLP_позивний_….tlp.json). Натисніть «Імпорт результатів» і виберіть одразу всі отримані файли: тут з\'являться розбір кожного, порівняння й відомість (CSV для Excel). Повторно надісланий файл замінює попередній. Курсанти, що працюють на цьому комп\'ютері, з\'являються тут автоматично; для керування обстановкою в реальному часі відкрийте сеанс курсанта в одній вкладці, а пульт — в іншій.', 'info'),
+        UI.note((T.Report && T.Report.canFetch()
+          ? 'Результати командирів із сайту надходять у Google-таблицю автоматично. Пульт підтягує нові під час відкриття; кнопка «Отримати результати» оновлює список вручну. Ваші коригування й коментарі під час оновлення зберігаються. Якщо командир надіслав файл (TLP_позивний_….tlp.json), скористайтеся «Імпорт результатів».'
+          : T.Report && T.Report.url() && U.viewer()
+            ? 'Автоматичне отримання результатів із Google працює лише в локальній версії (index.html на вашому комп\'ютері). Тут результати можна імпортувати з файлів (TLP_позивний_….tlp.json) кнопкою «Імпорт результатів».'
+            : 'Командири, що працюють на сайті, надсилають вам файли результатів (TLP_позивний_….tlp.json). Натисніть «Імпорт результатів» і виберіть одразу всі отримані файли.') + ' Тут з\'являться розбір кожного, порівняння й відомість (CSV для Excel). Повторно надісланий результат замінює попередній. Курсанти, що працюють на цьому комп\'ютері, з\'являються тут автоматично; для керування обстановкою в реальному часі відкрийте сеанс курсанта в одній вкладці, а пульт — в іншій.', 'info'),
         h('div', { class: 'st-card' }, h('h2', null, 'Сеанси (' + sessions.length + ')'),
           sessions.length ? h('div', { style: { overflowX: 'auto' } }, h('table', { class: 'tbl' },
             h('thead', null, h('tr', null, ['Курсант', 'Група', 'Сценарій', 'Режим', 'Прогрес', 'Бали', 'Оновлено', ''].map(t => h('th', null, t)))),
