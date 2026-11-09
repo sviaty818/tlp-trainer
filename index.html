@@ -22215,6 +22215,11 @@ window.TLP = window.TLP || {};
           UI.btn('✕', async () => { if (await UI.confirm('Видалити сеанс «' + U.esc((x.cadet && x.cadet.name) || '') + '»? Цю дію не можна скасувати.', 'Видалити')) { Store.remove(x.id); drawSess(); } }, 'sm danger', { title: 'Видалити' }))));
       };
       drawSess();
+      const unfinished = cadet ? Store.listSessions().find(x => !x.finished && Store.load(x.id)) : null;
+      const resumeCard = unfinished ? h('div', { class: 'st-card' }, h('h2', null, 'Незавершений сеанс'),
+        h('div', { class: 'sess-t' }, unfinished.scenarioTitle),
+        h('div', { class: 'sess-m', style: { margin: '4px 0 10px' } }, '«' + ((unfinished.cadet && unfinished.cadet.callsign) || (unfinished.cadet && unfinished.cadet.name) || '') + '» · ', T.MODES[unfinished.mode] ? T.MODES[unfinished.mode].title : unfinished.mode, ' · етап ' + (unfinished.step + 1) + '/8 · ', new Date(unfinished.updatedAt).toLocaleString('uk-UA')),
+        UI.btn('Продовжити ▶', () => this.resume(unfinished.id), 'primary')) : null;
 
       root.appendChild(h('div', { class: 'st-wrap' },
         h('div', { class: 'st-head' },
@@ -22253,7 +22258,9 @@ window.TLP = window.TLP || {};
                 const f = await U.pickFile('.json,application/json'); if (!f) return;
                 try { Store.importSession(f.text); UI.toast('Сеанс імпортовано.', 'ok'); drawSess(); } catch (e) { UI.toast('Помилка імпорту: ' + U.esc(e.message), 'error'); }
               }, 'sm'))),
-            h('div', { class: 'st-card', style: { marginTop: cadet ? '0' : '16px' } }, h('h2', null, 'Як працює тренажер'),
+            // для слухачів — лише продовження останнього незавершеного сеансу (якщо він є)
+            resumeCard,
+            h('div', { class: 'st-card', style: { marginTop: cadet && !resumeCard ? '0' : '16px' } }, h('h2', null, 'Як працює тренажер'),
               h('ol', { style: { margin: '0 0 0 18px', padding: 0, color: 'var(--text2)' } },
                 h('li', null, 'Ви — командир взводу. Пройдіть 8 етапів TLP: від отримання місії до бою.'),
                 h('li', null, 'На кожному етапі приймайте рішення: формуляри, карта, вибір варіантів.'),
@@ -22261,7 +22268,7 @@ window.TLP = window.TLP || {};
                 h('li', null, 'ІІ-інструктор ставить навідні запитання, а не дає готових відповідей.'),
                 h('li', null, 'Наприкінці — бій, оцінка за 100-бальною шкалою і детальний розбір.'),
                 cadet ? h('li', null, h('b', null, T.Report && T.Report.canSend() ? 'Після завершення результат автоматично надійде викладачу.' : 'Після завершення збережіть файл результату й надішліть його викладачу.')) : null)))),
-        h('div', { class: 'disclaimer' }, 'Навчальний інструмент. Усі сценарії, карти, підрозділи та характеристики вигадані й умовні; програма не є системою реального бойового управління і не містить реальних даних. Прогрес зберігається лише в цьому браузері (localStorage) — для перенесення використовуйте експорт сеансу.')));
+        h('div', { class: 'disclaimer' }, 'Навчальний інструмент. Усі сценарії, карти, підрозділи та характеристики вигадані й умовні; програма не є системою реального бойового управління і не містить реальних даних. Прогрес зберігається лише в цьому браузері (localStorage)' + (cadet ? ': продовжити незавершений сеанс можна тільки на цьому пристрої.' : ' — для перенесення використовуйте експорт сеансу.'))));
       if (cadet && T.Report && T.Report.canSend()) {
         T.Report.sendPending().then(n => { if (n) UI.toast('Раніше не надіслані результати передано викладачу: ' + n + '.', 'ok'); });
       }
