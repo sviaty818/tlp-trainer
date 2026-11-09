@@ -22247,12 +22247,13 @@ window.TLP = window.TLP || {};
                 if (st.mode === 'instructor') this.guardInstructor(go); else go();
               }, 'primary'))),
           h('div', null,
-            h('div', { class: 'st-card' }, h('h2', null, 'Збережені сеанси'), sessList,
+            // збережені сеанси та імпорт — лише в повній версії (для слухачів не показуються)
+            cadet ? null : h('div', { class: 'st-card' }, h('h2', null, 'Збережені сеанси'), sessList,
               h('div', { class: 'row', style: { marginTop: '10px' } }, UI.btn('Імпортувати сеанс (.json)', async () => {
                 const f = await U.pickFile('.json,application/json'); if (!f) return;
                 try { Store.importSession(f.text); UI.toast('Сеанс імпортовано.', 'ok'); drawSess(); } catch (e) { UI.toast('Помилка імпорту: ' + U.esc(e.message), 'error'); }
               }, 'sm'))),
-            h('div', { class: 'st-card', style: { marginTop: '16px' } }, h('h2', null, 'Як працює тренажер'),
+            h('div', { class: 'st-card', style: { marginTop: cadet ? '0' : '16px' } }, h('h2', null, 'Як працює тренажер'),
               h('ol', { style: { margin: '0 0 0 18px', padding: 0, color: 'var(--text2)' } },
                 h('li', null, 'Ви — командир взводу. Пройдіть 8 етапів TLP: від отримання місії до бою.'),
                 h('li', null, 'На кожному етапі приймайте рішення: формуляри, карта, вибір варіантів.'),
